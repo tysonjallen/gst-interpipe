@@ -482,13 +482,14 @@ gst_inter_pipe_src_create (GstBaseSrc * base, guint64 offset, guint size,
       "Dequeue buffer %p with timestamp (PTS) %" GST_TIME_FORMAT, *buf,
       GST_TIME_ARGS (GST_BUFFER_PTS (*buf)));
 
-  if (!g_queue_is_empty (src->pending_serial_events)) {
+  while (!g_queue_is_empty (src->pending_serial_events)) {
     guint curr_bytes;
     /*Pending Serial Events Queue */
     serial_event = g_queue_peek_head (src->pending_serial_events);
 
     GST_DEBUG_OBJECT (src,
-        "Got event with timestamp %" GST_TIME_FORMAT,
+        "Got event %s with timestamp %" GST_TIME_FORMAT,
+        GST_EVENT_TYPE_NAME (serial_event),
         GST_TIME_ARGS (GST_EVENT_TIMESTAMP (serial_event)));
 
     curr_bytes = gst_app_src_get_current_level_bytes (GST_APP_SRC (src));
@@ -523,6 +524,7 @@ gst_inter_pipe_src_create (GstBaseSrc * base, guint64 offset, guint size,
       GST_DEBUG_OBJECT (src, "Event %s timestamp is greater than the "
           "buffer timestamp, can't send serial event yet",
           GST_EVENT_TYPE_NAME (serial_event));
+          break;
     }
   }
 
@@ -699,6 +701,7 @@ gst_inter_pipe_src_push_buffer (GstInterPipeIListener * iface,
         GST_TIME_ARGS (GST_BUFFER_PTS (buffer)));
   } else if (GST_INTER_PIPE_SRC_RESTART_TIMESTAMP == src->stream_sync) {
     /* Remove the incoming timestamp to be generated according this basetime */
+    buffer = gst_buffer_make_writable (buffer);
     GST_BUFFER_PTS (buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DTS (buffer) = GST_CLOCK_TIME_NONE;
   }
@@ -747,8 +750,11 @@ gst_inter_pipe_src_push_event (GstInterPipeIListener * iface, GstEvent * event,
     srcbasetime = gst_element_get_base_time (GST_ELEMENT (appsrc));
 
     if (srcbasetime > basetime) {
-      GST_EVENT_TIMESTAMP (event) =
-          GST_EVENT_TIMESTAMP (event) - (srcbasetime - basetime);
+      if (GST_EVENT_TIMESTAMP (event) > (srcbasetime - basetime))
+        GST_EVENT_TIMESTAMP (event) =
+            GST_EVENT_TIMESTAMP (event) - (srcbasetime - basetime);
+      else
+        GST_EVENT_TIMESTAMP (event) = 0;
     } else {
       GST_EVENT_TIMESTAMP (event) =
           GST_EVENT_TIMESTAMP (event) + (basetime - srcbasetime);
